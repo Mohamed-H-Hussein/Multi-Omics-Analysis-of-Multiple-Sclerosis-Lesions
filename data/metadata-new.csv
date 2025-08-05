@@ -1,0 +1,19 @@
+X,Accession,Title,Age,Gender
+10A,GSM7021456,"Patient 10, lesion",67,M
+10B,GSM7021457,"Patient 10, NAWM",67,M
+9A,GSM7021454,"Patient 9, lesion",59,F
+9B,GSM7021455,"Patient 9, NAWM",59,F
+4A,GSM7021446,"Patient 4, lesion",56,M
+4B,GSM7021447,"Patient 4, NAWM",56,M
+3A,GSM7021444,"Patient 3, lesion",73,F
+3B,GSM7021445,"Patient 3, NAWM",73,F
+2A,GSM7021442,"Patient 2, lesion",52,M
+2B,GSM7021443,"Patient 2, NAWM",52,M
+6A,GSM7021450,"Patient 6, lesion",62,F
+6B,GSM7021451,"Patient 6, NAWM",62,F
+1A,GSM7021440,"Patient 1, lesion",82,M
+1B,GSM7021441,"Patient 1, NAWM",82,M
+5A,GSM7021448,"Patient 5, lesion",69,F
+5B,GSM7021449,"Patient 5, NAWM",69,F
+7A,GSM7021452,"Patient 7, lesion",65,F
+7B,GSM7021453,"Patient 7, NAWM",65,F
