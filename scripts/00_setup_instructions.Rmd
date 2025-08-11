@@ -1,0 +1,35 @@
+---
+title: "Multi-Omics Analysis of Multiple Sclerosis"
+author: 
+  - "Rofida Gamal (Original Instructor)"
+  - "Mohamed Hussein (Code Structuring,Analysis Execution,GitHub Publication)"
+date: "`r Sys.Date()`"
+output: html_document
+---
+## Setup Instructions
+
+This section explains how to install the required R and Bioconductor packages.
+
+Important Notes:
+
+- The code is commented out so it doesn’t run automatically.
+- To install the packages, remove the # and run each line manually.
+- If a package is already installed, R will skip reinstalling it.
+
+---
+
+
+```{r, eval=FALSE}
+# Install BiocManager if not already installed
+if (!requireNamespace("BiocManager", quietly = TRUE))
+  install.packages("BiocManager")
+
+# Set Bioconductor repositories
+options(repos = BiocManager::repositories())
+
+# Install required packages once
+# install.packages(c("tidyverse", "genefilter", "dplyr", "GeneNet", "ggfortify", "factoextra", "DescTools"))
+# BiocManager::install(c("DESeq2", "org.Hs.eg.db", "minfi", "IlluminaHumanMethylation450kanno.ilmn12.hg19","edgeR", "multtest","clusterProfiler", "vsn"))
+```
+
+

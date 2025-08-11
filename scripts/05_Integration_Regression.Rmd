@@ -1,0 +1,153 @@
+
+---
+title: "Multi-Omics Analysis of Multiple Sclerosis"
+author: 
+  - "Rofida Gamal (Original Instructor)"
+  - "Mohamed Hussein (Code Structuring,Analysis Execution,GitHub Publication)"
+date: "`r Sys.Date()`"
+output:
+  html_document
+---
+
+# Task 5: DEG-DMR Integration (Correlation + Regression)
+
+This task investigates the association between differentially expressed genes (DEGs) and differentially methylated regions (DMRs) by performing pairwise linear regression.the goal is to examine how CpG methylation levels correlate with gene expression, while adjusting for potential confounders like Age and Gender.
+
+---
+
+## DEG–DMR Association Analysis:
+
+- Subset RNA-seq and methylation matrices to DEGs and DMRs  
+- Match and align sample IDs across omics layers  
+- Prepare covariate metadata (Age, Gender)  
+- Run multiple linear regression for each DEG–DMR pair  
+  - Model: expression ~ methylation + age + gender  
+- Extract regression coefficients, p-values, and R²  
+- Save all results to CSV
+This analysis facilitates integrative interpretation and highlights key epigenetic drivers of gene regulation in MS lesions.
+
+---
+
+### Load All Required Libraries for Multi-Omics Analysis 
+
+```{r, include=FALSE, message=FALSE, warning=FALSE}
+library(DESeq2)
+library(edgeR)
+library(vsn)
+library(tidyverse)
+library(genefilter)
+library(multtest)
+library(dplyr)
+library(clusterProfiler)
+library(org.Hs.eg.db)
+library(AnnotationDbi)
+library(GeneNet)
+library(ggfortify)
+library(factoextra)
+library(minfi)
+library(DescTools)
+library(IlluminaHumanMethylation450kanno.ilmn12.hg19)
+
+
+```
+## DEG–DMR Correlation & Linear Regression (with Age + Gender)
+```{r}
+
+# Load required data objects
+
+# Load z-score normalized RNA expression matrix
+rna_tmm <- read.csv("RNA_TMM_log2_zscore.csv", row.names = 1, check.names = FALSE)
+
+# Load filtered methylation matrix
+meth <- read.csv("Methylation_20000_Top_expressed.csv", row.names = 1, check.names = FALSE)
+meth <- meth[complete.cases(meth), ]
+# Load metadata (rna_meta)
+rna_meta <- read.csv("metadata-new.csv")
+
+# Extract patient and sample type from Title column
+rna_meta <- rna_meta %>%
+  separate(Title, into = c("patient", "sample.type"), sep = ",", fill = "right") %>%
+  mutate(sample.type = trimws(sample.type))
+
+# Load DMRs from Task 4 
+
+deg_filtered <- read.csv("DEG_significant_filtered.csv", row.names = 1)
+dmrs_lm <- read.csv("dmrs_methylation_lm_based.csv", row.names = 1)
+
+# These lines are essential to make this analysis reproducible when run independently
+# ----------------------------------------------------------
+# Correlation between DEGs and DMRs using multiple regression
+# Adjusting for age and gender
+# ----------------------------------------------------------
+rna_tmm <- read.csv("RNA_TMM_log2_zscore.csv", row.names = 1, check.names = FALSE)
+
+# Subset RNA matrix to DEGs only
+rna_deg <- rna_tmm[rownames(rna_tmm) %in% rownames(deg_filtered), ]
+
+# Subset methylation matrix to DMRs (from lm-based method)
+meth_dmr <- meth[rownames(meth) %in% rownames(dmrs_lm), ]
+
+# Get common sample names across both datasets
+common_samples <- intersect(colnames(rna_deg), colnames(meth_dmr))
+
+# Keep only common samples
+rna_deg <- rna_deg[, common_samples]
+meth_dmr <- meth_dmr[, common_samples]
+
+# Subset metadata to common samples (match order)
+meta_filtered <- rna_meta[match(common_samples, rna_meta$X), ]
+
+# -------------------------
+# Subset a few genes and CpGs for speed (sampling)
+# -------------------------
+# Set a fixed random seed to ensure reproducibility of gene–CpG sampling
+set.seed(42)  # Using 42 as a conventional and widely adopted reproducibility seed
+subset_genes <- sample(rownames(rna_deg), 25)      # Randomly select 25 genes
+subset_cpgs <- sample(rownames(meth_dmr), 100)     # Randomly select 100 CpGs
+
+# -------------------------
+# Perform linear regression for each gene–CpG pair
+# -------------------------
+results <- list()  # to collect results
+
+for (gene in subset_genes) {
+  for (cpg in subset_cpgs) {
+    
+    # Build regression dataframe
+    df <- data.frame(
+      expr = as.numeric(rna_deg[gene, ]),         # gene expression
+      meth = as.numeric(meth_dmr[cpg, ]),         # methylation
+      age = meta_filtered$Age,                    # age covariate
+      gender = meta_filtered$Gender               # gender covariate
+    )
+    
+    # Fit linear model: expression ~ methylation + age + gender
+    model <- lm(expr ~ meth + age + gender, data = df)
+    
+    # Get the gender variable name (in case it's a factor with levels)
+    gender_var <- setdiff(names(coef(model)), c("(Intercept)", "meth", "age"))[1]
+    
+    # Extract coefficients and p-values
+    results[[length(results) + 1]] <- data.frame(
+      Gene = gene, CpG = cpg,
+      Coef_CpG = coef(model)["meth"],
+      Coef_Age = coef(model)["age"],
+      Coef_Gender = if (!is.na(gender_var)) coef(model)[gender_var] else NA,
+      p_CpG = summary(model)$coefficients["meth", 4],
+      p_Age = summary(model)$coefficients["age", 4],
+      p_Gender = if (!is.na(gender_var)) summary(model)$coefficients[gender_var, 4] else NA,
+      R2 = summary(model)$r.squared
+    )
+  }
+}
+
+# Combine all regression results into a dataframe
+reg_results_df <- do.call(rbind, results)
+
+# Save to file
+write.csv(reg_results_df, "DEG_DMR_linear_models_withAgeGender.csv", row.names = FALSE)
+
+
+
+```
+

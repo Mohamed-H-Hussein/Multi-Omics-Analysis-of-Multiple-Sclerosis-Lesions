@@ -1,0 +1,267 @@
+---
+title: "Multi-Omics Analysis of Multiple Sclerosis"
+author: 
+  - "Rofida Gamal (Original Instructor)"
+  - "Mohamed Hussein (Code Structuring,Analysis Execution,GitHub Publication)"
+date: "`r Sys.Date()`"
+output: html_document
+---
+# Task 4: Differential Expression & Methylation Analysis
+
+This task performs *differential expression analysis* on RNA-seq data and *differential methylation analysis* on CpG methylation data. The goal is to identify genes and CpG sites that show significant differences between *Lesion* and *NAWM* samples.
+
+The analysis is divided into two main sections:
+
+---
+
+##  RNA-seq Differential Expression:
+
+- Build a design matrix based on sample type  
+- Estimate dispersion and fit GLM model using *edgeR*  
+- Test contrast: *Lesion vs NAWM*  
+- Filter genes with:
+  - Adjusted p-value < 0.05
+  - |log2 Fold Change| > 1  
+- Save both full and filtered results
+
+---
+
+## DNA Methylation Differential Analysis:
+
+Three statistical methods are used for comparison:
+
+1. *Linear Model (lm):*  
+   - Fit a linear model for each CpG
+   - Extract beta coefficients and p-values  
+2. *T-test (row-wise):*  
+   - Compare methylation between Lesion vs NAWM using rowttests  
+3. *Generalized Linear Model (glm):*  
+   - Fit GLMs with Gaussian distribution per CpG  
+   - Extract effect size and significance
+
+All results are saved for downstream integration and visualization.
+
+
+### Load All Required Libraries for Multi-Omics Analysis
+```{r, include=FALSE, message=FALSE, warning=FALSE}
+library(DESeq2)
+library(edgeR)
+library(vsn)
+library(tidyverse)
+library(genefilter)
+library(multtest)
+library(dplyr)
+library(clusterProfiler)
+library(org.Hs.eg.db)
+library(AnnotationDbi)
+library(GeneNet)
+library(ggfortify)
+library(factoextra)
+library(minfi)
+library(DescTools)
+library(IlluminaHumanMethylation450kanno.ilmn12.hg19)
+
+```
+## Differential Expression Analysis
+```{r}
+# Load filtered preprocessed data from Task 2
+rna_counts_filtered <- read.csv("Filtered_counts_less90perc_zeros.csv", row.names = 1)
+
+# Create DGEList and normalize again (to ensure reproducibility if this Rmd is run independently)
+dge <- DGEList(counts = rna_counts_filtered)
+dge <- calcNormFactors(dge, method = "TMM")
+
+# Load metadata
+rna_meta <- read.csv("metadata-new.csv")
+rna_meta <- rna_meta %>%
+  separate(Title, into = c("patient", "sample.type"), sep = ",", fill = "right") %>%
+  mutate(sample.type = trimws(sample.type))
+
+# These steps load essential data from Task 2 (RNA-seq preprocessing) 
+# to make this R notebook independent and reproducible
+# -------------------------------
+# Differential Expression Analysis (EdgeR)
+# -------------------------------
+
+# Create a grouping factor based on sample type (e.g., "lesion", "NAWM")
+group <- factor(rna_meta$sample.type)
+
+# Create a design matrix for the model without intercept (each group gets its own column)
+design <- model.matrix(~0 + group)
+
+# Rename the design matrix columns to match group names
+colnames(design) <- levels(group)
+
+# Estimate dispersion for the DGEList object using the design
+dge <- estimateDisp(dge, design)
+
+# Fit a negative binomial GLM to the count data
+fit <- glmFit(dge, design)
+
+# Define contrast: lesion vs NAWM (i.e., logFC of lesion minus NAWM)
+contrast <- makeContrasts(lesion - NAWM, levels = design)
+
+# Perform likelihood ratio test for the contrast
+lrt <- glmLRT(fit, contrast = contrast)
+
+# Extract the full table of differentially expressed genes
+deg_results <- topTags(lrt, n = Inf)$table
+
+# Filter significant DEGs: adjusted p-value < 0.05 and |log2FC| > 1 (i.e., fold change > 2)
+deg_filtered <- deg_results %>%
+  filter(FDR < 0.05 & abs(logFC) > log2(2))
+
+# Save both the complete and filtered DEG results
+write.csv(deg_results, "DEG_results_all.csv")
+write.csv(deg_filtered, "DEG_significant_filtered.csv")
+
+```
+
+##: Differential Methylation Analysis
+```{r}
+#Load data
+meth <- read.csv("Methylation_20000_Top_expressed.csv", row.names = 1, check.names = FALSE)
+meth <- meth[complete.cases(meth), ]
+meth_meta <- rna_meta
+lesion_names <- meth_meta$X[meth_meta$sample.type == "lesion"]
+nawm_names <- meth_meta$X[meth_meta$sample.type == "NAWM"]
+meth_mat <- meth[, c(nawm_names, lesion_names)]
+
+# # Define control group indices (NAWM samples)
+
+ctrl.idx <- 1:length(nawm_names)
+# Define case group indices (lesion samples)
+case.idx <- (length(nawm_names) + 1):ncol(meth_mat)
+group_factor <- factor(c(rep(1, length(ctrl.idx)), rep(2, length(case.idx))))
+meth_mat <- meth[, c(nawm_names, lesion_names)]
+```
+
+Option 1: Linear Model (lm)
+```{r}
+# -----------------------------------------------
+# Differential Methylation Analysis using lm()
+# -----------------------------------------------
+
+# Apply a linear model to each CpG site (row of methylation matrix)
+meth_lm <- lapply(1:nrow(meth_mat), function(i) {
+  
+  # Build data frame: methylation values + group info
+  df <- data.frame(val = as.numeric(meth_mat[i, ]), grp = group_factor)
+  
+  # Fit linear model: methylation ~ group (e.g., control vs case)
+  mod <- lm(val ~ grp, data = df)
+  sm <- summary(mod)
+  
+  # Extract beta and p-value for group difference if available
+  if ("grp2" %in% rownames(sm$coefficients)) {
+    return(c(beta = sm$coefficients["grp2", "Estimate"],
+             pval = sm$coefficients["grp2", "Pr(>|t|)"]))
+  } else {
+    return(c(beta = NA, pval = NA))
+  }
+})
+
+# Combine results into a data frame and assign CpG names
+meth_lm_df <- as.data.frame(do.call(rbind, meth_lm))
+rownames(meth_lm_df) <- rownames(meth_mat)  # Assign CpG IDs
+
+# Adjust p-values using FDR (Benjamini-Hochberg)
+meth_lm_df$padj <- p.adjust(meth_lm_df$pval, method = "BH")
+
+# Filter significant DMRs (FDR < 0.05 and absolute beta > log2(1))
+dmrs_lm <- meth_lm_df %>%
+  filter(padj < 0.05 & abs(beta) > log2(1))
+
+# Save results with CpG names as rownames
+write.csv(dmrs_lm, "dmrs_methylation_lm_based.csv", row.names = TRUE)
+
+```
+Option 2: t-test
+
+```{r}
+# -----------------------------------------------
+# Differential Methylation Analysis using t-test
+# -----------------------------------------------
+
+# Define group indices
+ctrl.idx <- 1:length(nawm_names)  # Indices of NAWM (control) samples
+case.idx <- (length(nawm_names)+1):ncol(meth_mat)  # Indices of lesion (case) samples
+
+# Compute log fold change between lesion and NAWM groups for each CpG
+lfc <- rowMeans(meth_mat[, case.idx]) - rowMeans(meth_mat[, ctrl.idx])
+
+# Create a group label factor: 1 = control, 2 = case
+group_factor <- factor(c(rep(1, length(ctrl.idx)), rep(2, length(case.idx))))
+
+# Perform row-wise two-sample t-tests across all CpGs
+# 'rowttests' is efficient for testing each row (CpG site) between two groups
+pvals <- rowttests(as.matrix(meth_mat), group_factor)$p.value
+
+# Adjust raw p-values using Benjamini-Hochberg procedure to control FDR
+adj.p <- mt.rawp2adjp(pvals, proc = "BH")$adjp[,2]
+
+# Combine results into a dataframe
+meth_res <- data.frame(logFC = lfc, pval = pvals, padj = adj.p)
+
+# Filter significant differentially methylated regions (DMRs)
+# Criteria: adjusted p-value < 0.05 and absolute logFC > log2(1)
+dmrs <- meth_res %>%
+  filter(padj < 0.05 & abs(logFC) > log2(1))
+
+# Save DMR results to CSV
+write.csv(dmrs, "dmrs_methylation.csv")
+
+```
+Option 3: Generalized Linear Model (glm)
+
+```{r}
+# ----------------------------------------------------------
+# Differential Methylation Analysis using Generalized Linear Model (GLM)
+# ----------------------------------------------------------
+
+# Loop over all CpG sites (rows of methylation matrix)
+meth_glm <- lapply(1:nrow(meth_mat), function(i) {
+  
+  # Build a dataframe for this CpG:
+  # 'val' = methylation values across samples, 'grp' = group labels (control vs case)
+  df <- data.frame(val = as.numeric(meth_mat[i, ]), grp = group_factor)
+  
+  # Fit a GLM (Gaussian family, equivalent to linear regression)
+  mod <- glm(val ~ grp, data = df, family = gaussian())
+  
+  # Summarize the model to extract coefficients and p-values
+  sm <- summary(mod)
+  
+  # Check if the group contrast (grp2) exists in the model
+  if ("grp2" %in% rownames(sm$coefficients)) {
+    return(c(
+      beta = sm$coefficients["grp2", "Estimate"],        # Estimated effect size (log fold change)
+      pval = sm$coefficients["grp2", "Pr(>|t|)"]          # p-value for group effect
+    ))
+  } else {
+    # If 'grp2' is not present (e.g., no variation), return NA
+    return(c(beta = NA, pval = NA))
+  }
+})
+
+# Combine the list of results into a single data frame
+meth_glm_df <- as.data.frame(do.call(rbind, meth_glm))
+
+# Assign CpG site names as rownames from the original matrix
+rownames(meth_glm_df) <- rownames(meth_mat)
+
+# Adjust p-values using Benjamini-Hochberg correction
+meth_glm_df$padj <- p.adjust(meth_glm_df$pval, method = "BH")
+
+# Filter significant DMRs:
+# - adjusted p-value < 0.05
+# - absolute log fold change > log2(1)
+dmrs_glm <- meth_glm_df %>%
+  filter(padj < 0.05 & abs(beta) > log2(1))
+
+# Save significant DMRs to file with CpG names as row names
+write.csv(dmrs_glm, "dmrs_glm_filtered.csv", row.names = TRUE)
+
+
+```
+

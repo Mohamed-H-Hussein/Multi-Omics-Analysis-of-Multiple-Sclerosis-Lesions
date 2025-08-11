@@ -1,0 +1,257 @@
+---
+title: "Multi-Omics Analysis of Multiple Sclerosis"
+author: 
+  - "Rofida Gamal (Original Instructor)"
+  - "Mohamed Hussein (Code Structuring,Analysis Execution,GitHub Publication)"
+date: "`r Sys.Date()`"
+output:
+  html_document
+---
+# Task 6: Multi-Omics Network Construction and Annotation
+
+This task constructs and annotates an integrative multi-omics network connecting differentially expressed genes (DEGs) and differentially methylated regions (DMRs). The network includes:
+
+- Gene–Gene partial correlation network  
+- CpG–CpG partial correlation network  
+- CpG–Gene connections from prior regression analysis  
+
+All edges are filtered by significance (p < 0.05) and annotated using reference gene and CpG annotation databases. The final network is saved in a unified CSV file for visualization (e.g. Cytoscape).
+
+All required input files are loaded independently to ensure reproducibility and modularity.
+
+
+
+---
+
+### Load All Required Libraries for Multi-Omics Analysis 
+
+```{r, include=FALSE, message=FALSE, warning=FALSE}
+library(DESeq2)
+library(edgeR)
+library(vsn)
+library(tidyverse)
+library(genefilter)
+library(multtest)
+library(dplyr)
+library(clusterProfiler)
+library(org.Hs.eg.db)
+library(AnnotationDbi)
+library(GeneNet)
+library(ggfortify)
+library(factoextra)
+library(minfi)
+library(DescTools)
+library(IlluminaHumanMethylation450kanno.ilmn12.hg19)
+
+```
+
+```{r}
+# ---------------------------------------------------------------
+# Load Input Data from Previous Parts
+# -------------------------------
+
+# 1. Load DEG matrix and subset
+rna_deg <- read.csv("RNA_TMM_log2_zscore.csv", row.names = 1, check.names = FALSE)
+deg_filtered <- read.csv("DEG_significant_filtered.csv", row.names = 1)
+rna_deg <- rna_deg[rownames(rna_deg) %in% rownames(deg_filtered), ]
+
+# 2. Load methylation matrix and subset
+meth <- read.csv("Methylation_20000_Top_expressed.csv", row.names = 1, check.names = FALSE)
+dmrs_lm <- read.csv("dmrs_methylation_lm_based.csv", row.names = 1)
+meth_dmr <- meth[rownames(meth) %in% rownames(dmrs_lm), ]
+
+# 3. Load DEG–DMR regression results
+reg_results_df <- read.csv("DEG_DMR_linear_models_withAgeGender.csv")
+
+
+
+# ---------------------------------------------------------------
+# Ready for Network Construction and Annotation
+# ---------------------------------------------------------------
+
+# Load GeneNet for partial correlation analysis
+library(GeneNet)
+
+# --------------------------
+# 1. Gene–Gene Network
+# --------------------------
+
+# Correlation matrix for genes across samples (transpose needed)
+gene_corr <- cor(t(rna_deg), method = "pearson", use = "pairwise.complete.obs")
+
+# Estimate partial correlations between genes
+gene_pcor <- ggm.estimate.pcor(t(rna_deg))
+
+# Test partial correlations to get edges (undirected network)
+gene_edges <- network.test.edges(gene_pcor, direct = FALSE)
+
+# Keep only significant gene–gene interactions (p < 0.05)
+gene_edges_sig <- subset(gene_edges, pval < 0.05)
+
+# Retrieve gene names to map from index to names
+gene_names <- rownames(rna_deg)
+gene_edges_sig$node1 <- gene_names[gene_edges_sig$node1]
+gene_edges_sig$node2 <- gene_names[gene_edges_sig$node2]
+
+# --------------------------
+# 2. CpG–CpG Network
+# --------------------------
+
+# To save memory, subset to 1000 CpGs
+test_meth <- meth_dmr[1:1000, ] 
+
+# Estimate CpG–CpG partial correlations
+cpg_pcor <- ggm.estimate.pcor(t(test_meth))
+cpg_edges <- network.test.edges(cpg_pcor, direct = FALSE)
+cpg_edges_sig <- subset(cpg_edges, pval < 0.05)
+
+# Map node indices to CpG IDs
+cpg_names <- rownames(test_meth)
+cpg_edges_sig$node1 <- cpg_names[cpg_edges_sig$node1]
+cpg_edges_sig$node2 <- cpg_names[cpg_edges_sig$node2]
+
+# --------------------------
+# 3. DEG–DMR Correlation Edges (from regression)
+# --------------------------
+
+reg_edges <- data.frame(
+  Source = reg_results_df$CpG,
+  Target = reg_results_df$Gene,
+  Type = "CpG-Gene",
+  Weight = -log10(reg_results_df$p_CpG)
+)
+
+# --------------------------
+# 4. Format Gene–Gene Edges
+# --------------------------
+
+gene_edges_fmt <- data.frame(
+  Source = gene_edges_sig$node1,
+  Target = gene_edges_sig$node2,
+  Type = "Gene-Gene",
+  Weight = -log10(gene_edges_sig$pval)
+)
+
+# --------------------------
+# 5. Format CpG–CpG Edges
+# --------------------------
+
+cpg_edges_fmt <- data.frame(
+  Source = cpg_edges_sig$node1,
+  Target = cpg_edges_sig$node2,
+  Type = "CpG-CpG",
+  Weight = -log10(cpg_edges_sig$pval)
+)
+
+# --------------------------
+# 6. Combine all edges into full network
+# --------------------------
+
+full_network <- rbind(reg_edges, gene_edges_fmt, cpg_edges_fmt)
+write.csv(full_network, "full_multiomics_network.csv", row.names = FALSE)
+
+# ---------------------------------------------------------------
+# ANNOTATION OF NETWORK EDGES
+# ---------------------------------------------------------------
+
+# --------------------------
+# Annotate Gene–Gene Edges
+# --------------------------
+
+# Ensure correct data types
+gene_edges_fmt <- gene_edges_fmt %>%
+  mutate(Source = as.character(Source), Target = as.character(Target))
+
+# Get EntrezID–Symbol mapping
+gene_ids <- unique(c(gene_edges_fmt$Source, gene_edges_fmt$Target))
+gene_anno <- AnnotationDbi::select(
+  org.Hs.eg.db,
+  keys = gene_ids,
+  columns = c("ENTREZID", "SYMBOL"),
+  keytype = "ENTREZID"
+)
+
+# Map symbols for source and target
+gene_edges_annot <- gene_edges_fmt %>%
+  left_join(gene_anno, by = c("Source" = "ENTREZID")) %>%
+  rename(Source_Symbol = SYMBOL) %>%
+  left_join(gene_anno, by = c("Target" = "ENTREZID")) %>%
+  rename(Target_Symbol = SYMBOL) %>%
+  filter(!is.na(Source_Symbol), !is.na(Target_Symbol))  # remove missing
+
+# Save
+write.csv(gene_edges_annot, "gene_edges_annotated.csv", row.names = FALSE)
+
+# --------------------------
+# Annotate CpG–CpG Edges
+# --------------------------
+
+# Load 450k annotation
+ann450k <- getAnnotation(IlluminaHumanMethylation450kanno.ilmn12.hg19)
+
+# Ensure character columns
+cpg_edges_fmt <- cpg_edges_fmt %>%
+  mutate(Source = as.character(Source), Target = as.character(Target))
+
+# Get CpG IDs and subset annotation
+cpg_ids <- unique(c(cpg_edges_fmt$Source, cpg_edges_fmt$Target))
+ann_sub <- ann450k[rownames(ann450k) %in% cpg_ids, ]
+
+# Create CpG annotation dataframe
+cpg_anno_df <- data.frame(
+  CpG_ID = rownames(ann_sub),
+  Gene_Annot = ann_sub$UCSC_RefGene_Name
+)
+
+# Keep only first gene name per CpG
+cpg_anno_df$Gene_Annot <- sapply(strsplit(as.character(cpg_anno_df$Gene_Annot), ";"), `[`, 1)
+
+# Annotate CpG edges
+cpg_edges_annot <- cpg_edges_fmt %>%
+  left_join(cpg_anno_df, by = c("Source" = "CpG_ID")) %>%
+  rename(Source_CpG_Gene = Gene_Annot) %>%
+  left_join(cpg_anno_df, by = c("Target" = "CpG_ID")) %>%
+  rename(Target_CpG_Gene = Gene_Annot) %>%
+  filter(!is.na(Source_CpG_Gene), !is.na(Target_CpG_Gene))
+
+# Save
+write.csv(cpg_edges_annot, "cpg_edges_annotated.csv", row.names = FALSE)
+
+# --------------------------
+# Annotate CpG–Gene Edges (from regression)
+# --------------------------
+
+reg_edges <- reg_edges %>%
+  mutate(Source = as.character(Source), Target = as.character(Target))
+
+# Gene annotation
+gene_anno_reg <- AnnotationDbi::select(
+  org.Hs.eg.db,
+  keys = unique(reg_edges$Target),
+  columns = c("ENTREZID", "SYMBOL"),
+  keytype = "ENTREZID"
+)
+
+# Annotate gene symbols
+reg_edges_annot <- reg_edges %>%
+  left_join(gene_anno_reg, by = c("Target" = "ENTREZID")) %>%
+  rename(Target_Symbol = SYMBOL)
+
+# Annotate CpG genes
+ann_sub_cpg <- ann450k[rownames(ann450k) %in% reg_edges_annot$Source, ]
+cpg_anno_df <- data.frame(
+  Source = rownames(ann_sub_cpg),
+  CpG_Gene_Annotation = ann_sub_cpg$UCSC_RefGene_Name
+)
+cpg_anno_df$CpG_Gene_Annotation <- sapply(strsplit(as.character(cpg_anno_df$CpG_Gene_Annotation), ";"), `[`, 1)
+
+# Join CpG annotations
+reg_edges_annot <- reg_edges_annot %>%
+  left_join(cpg_anno_df, by = "Source") %>%
+  filter(!is.na(Target_Symbol), !is.na(CpG_Gene_Annotation))
+
+# Save
+write.csv(reg_edges_annot, "gene-cpg_edges_annotated.csv", row.names = FALSE)
+
+```
+

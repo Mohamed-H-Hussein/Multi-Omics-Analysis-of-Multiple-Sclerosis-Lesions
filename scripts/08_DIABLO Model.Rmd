@@ -1,0 +1,262 @@
+
+---
+title: "Multi-Omics Analysis of Multiple Sclerosis"
+author: 
+  - "Rofida Gamal (Original Instructor)"
+  - "Mohamed Hussein (Code Structuring,Analysis Execution,GitHub Publication)"
+date: "`r Sys.Date()`"
+output:
+  html_document
+---
+
+## Task 8: Multi-Omics Integration via DIABLO
+
+This task uses the DIABLO framework from mixOmics to integrate DNA methylation and gene expression data for classifying Multiple Sclerosis samples (lesion vs. NAWM). The workflow includes:
+
+- Preprocessing and filtering low-variance features  
+- Tuning and building a two-component DIABLO model  
+- Visualizing sample projections and omics correlations  
+- Extracting discriminative CpGs and genes  
+- Evaluating performance via cross-validation, ROC, and confusion matrix
+
+The final model identifies multi-omics signatures distinguishing lesion status, supporting downstream biomarker discovery.
+
+---
+
+### Load All Required Libraries for Multi-Omics Analysis 
+
+```{r, include=FALSE, message=FALSE, warning=FALSE}
+library(DESeq2)
+library(edgeR)
+library(vsn)
+library(tidyverse)
+library(genefilter)
+library(multtest)
+library(dplyr)
+library(clusterProfiler)
+library(org.Hs.eg.db)
+library(AnnotationDbi)
+library(GeneNet)
+library(ggfortify)
+library(factoextra)
+library(minfi)
+library(DescTools)
+library(IlluminaHumanMethylation450kanno.ilmn12.hg19)
+
+```
+
+##Load Input Data from Previous Parts
+
+```{r}
+# ---- Load Input Data from Previous Parts ----
+# ---- Load RNA-seq count matrix and metadata ----
+
+# Load RNA-seq counts
+rna_counts <- read.delim("GSE224377_raw_counts_GRCh38.p13_NCBI (1).tsv", row.names = 1)
+
+# Load metadata
+rna_meta <- read.csv("metadata-new.csv")
+
+# Match sample names in counts matrix using metadata
+colnames(rna_counts) <- rna_meta$X[match(colnames(rna_counts), rna_meta$Accession)]
+
+# Extract patient and sample type
+library(dplyr)
+library(tidyr)
+
+rna_meta <- rna_meta %>%
+  separate(Title, into = c("patient", "sample.type"), sep = ",", fill = "right") %>%
+  mutate(sample.type = trimws(sample.type))
+
+# Load methylation matrix and remove rows with missing values
+meth <- read.csv("Methylation_20000_Top_expressed.csv", row.names = 1, check.names = FALSE)
+meth <- meth[complete.cases(meth), ]
+
+# Ensure metadata is available (assumed to be already loaded as rna_meta)
+meth_meta <- rna_meta
+
+# Match samples between metadata and methylation data
+valid_samples <- intersect(meth_meta$X, colnames(meth))
+
+# Filter metadata and methylation matrix based on available matching samples
+meth_meta_filtered <- meth_meta[meth_meta$X %in% valid_samples, ]
+meth_filtered <- meth[, valid_samples]
+
+# Define NAWM and lesion sample names from filtered metadata
+nawm_names <- meth_meta_filtered$X[meth_meta_filtered$sample.type == "NAWM"]
+lesion_names <- meth_meta_filtered$X[meth_meta_filtered$sample.type == "lesion"]
+
+# Create final methylation matrix with ordered samples
+meth_mat <- meth_filtered[, c(nawm_names, lesion_names)]
+
+# Define group indices (optional, if needed later)
+ctrl.idx <- 1:length(nawm_names)
+case.idx <- (length(nawm_names) + 1):ncol(meth_mat)
+group_factor <- factor(c(rep(1, length(ctrl.idx)), rep(2, length(case.idx))))
+```
+
+##ready to start DIABLO model
+```{r}
+# ---- Load Required Libraries ----
+library(mixOmics)
+library(pROC)
+library(caret)     # For nearZeroVar
+library(ggplot2)
+# Load GE_z and fix column names
+GE_z <- read.csv("RNA_TMM_log2_zscore.csv", row.names = 1)
+
+# Remove leading 'X' added by write.csv() to numeric-starting column names
+colnames(GE_z) <- gsub("^X", "", colnames(GE_z))
+
+# Check and reorder columns
+GE_z <- GE_z[, colnames(meth_mat)]
+
+
+# ---- Load and Prepare Data ----
+
+# Transpose data so rows = samples, columns = features
+methyl_data <- t(meth)
+rna_data <- t(GE_z)
+
+# Ensure all data is numeric
+methyl_data <- as.data.frame(lapply(as.data.frame(methyl_data), as.numeric))
+rna_data <- as.data.frame(lapply(as.data.frame(rna_data), as.numeric))
+
+# Define outcome variable (factor with >1 level)
+Y <- as.factor(meth_meta$sample.type)
+
+# Check Y has >1 level
+if (nlevels(Y) < 2) {
+  stop("Error: Outcome variable Y must have at least two classes.")
+}
+
+# ---- Remove Near-Zero Variance Features ----
+nzv_methyl <- nearZeroVar(methyl_data, saveMetrics = TRUE)
+methyl_data <- methyl_data[, !nzv_methyl$nzv]  # Remove all near-zero variance columns
+
+
+nzv_rna <- nearZeroVar(rna_data, saveMetrics = TRUE)
+rna_data <- rna_data[, !nzv_rna$nzv]
+
+# ---- Ensure Matching Sample Order ----
+stopifnot(rownames(methyl_data) == rownames(rna_data))
+
+# ---- Create Multi-Omics Block ----
+data_list <- list(methyl = methyl_data, rna = rna_data)
+
+# ---- DIABLO Design Matrix ----
+design <- matrix(0.1, ncol = length(data_list), nrow = length(data_list),
+                 dimnames = list(names(data_list), names(data_list)))
+diag(design) <- 0
+
+# ---- Tuning Step ----
+list.keepX <- list(
+  methyl = c(10, 25, 50),
+  rna = c(10, 25, 50)
+)
+# Fix randomness for reproducibility
+set.seed(42)
+
+tune <- tune.block.splsda(
+  X = data_list,
+  Y = Y,
+  ncomp = 2,
+  test.keepX = list.keepX,
+  design = design,
+  validation = 'Mfold',
+  folds = 5,
+  nrepeat = 1,
+  dist = "centroids.dist"
+)
+
+# ---- Optimal keepX ----
+keepX.optimal <- tune$choice.keepX
+
+# ---- Final DIABLO Model ----
+diablo_model <- block.splsda(
+  X = data_list,
+  Y = Y,
+  ncomp = 2,
+  keepX = keepX.optimal,
+  design = design,
+  near.zero.var = TRUE
+)
+
+
+# ---- Sample Projections ----
+plotIndiv(diablo_model, legend = TRUE, title = "DIABLO: Sample Projection")
+plotDiablo(diablo_model)
+circosPlot(diablo_model, comp = 1, cutoff = 0.7)
+
+# ---- Extract Selected Features (Per Block and Component) ----
+
+# Helper function to extract names robustly
+getSelected <- function(model, block, comp) {
+  out <- selectVar(model, block = block, comp = comp)
+  if (!is.null(out) && !is.null(out[[block]]$name)) {
+    return(out[[block]]$name)
+  } else if (!is.null(out$name)) {
+    return(out$name)
+  } else {
+    return(NULL)
+  }
+}
+
+selected_genes_c1  <- getSelected(diablo_model, "rna", comp = 1)
+selected_cpgs_c1   <- getSelected(diablo_model, "methyl", comp = 1)
+selected_genes_c2  <- getSelected(diablo_model, "rna", comp = 2)
+selected_cpgs_c2   <- getSelected(diablo_model, "methyl", comp = 2)
+
+# ---- Export Selected Features ----
+write.csv(selected_genes_c1, "selected_genes_component1.csv", row.names = FALSE)
+write.csv(selected_cpgs_c1,  "selected_cpgs_component1.csv", row.names = FALSE)
+write.csv(selected_genes_c2, "selected_genes_component2.csv", row.names = FALSE)
+write.csv(selected_cpgs_c2,  "selected_cpgs_component2.csv", row.names = FALSE)
+
+# ---- Loadings Plot ----
+plotLoadings(diablo_model, comp = 1, block = "rna", method = 'mean', contrib = 'max')
+plotLoadings(diablo_model, comp = 1, block = "methyl", method = 'mean', contrib = 'max')
+
+# ---- Model Performance ----
+perf_diablo <- perf(
+  diablo_model,
+  validation = "Mfold",
+  folds = 5,
+  nrepeat = 10
+)
+print(perf_diablo$error.rate)
+plot(perf_diablo)
+
+# ---- ROC and AUC ----
+aucs <- auroc(diablo_model)
+print(aucs)
+
+# ---- Confusion Matrix ----
+# Use test data structured the same way as data_list
+diablo_model <- block.splsda(X = data_list, Y = Y, design = design, ncomp = 2)
+
+# Step 1: Predict using trained model
+pred <- predict(diablo_model, newdata = data_list)
+# Extract predicted labels for comp1
+pred_labels <- pred$MajorityVote$max.dist[, "comp1"]
+
+# Check the prediction
+print(pred_labels)
+
+# Create confusion matrix against actual labels
+conf_matrix <- table(Predicted = pred_labels, Actual = Y)
+print(conf_matrix)
+
+
+
+# ---- Accuracy ----
+accuracy <- sum(diag(conf_matrix)) / sum(conf_matrix)
+cat("Accuracy:", round(accuracy, 3), "\n")
+
+```
+
+
+
+
+
+

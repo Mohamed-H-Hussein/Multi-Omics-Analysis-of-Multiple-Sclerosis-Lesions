@@ -1,0 +1,156 @@
+---
+title: "Multi-Omics Analysis of Multiple Sclerosis"
+author: 
+  - "Rofida Gamal (Original Instructor)"
+  - "Mohamed Hussein (Code Structuring,Analysis Execution,GitHub Publication)"
+date: "`r Sys.Date()`"
+output: html_document
+---
+# Task 2: RNA-seq Data Preprocessing and Normalization
+
+This task processes the raw RNA-seq gene expression data by performing multiple normalization steps to prepare it for downstream differential expression and integrative analysis. The steps include:
+
+- Loading gene count matrix and sample metadata  
+- Filtering lowly expressed genes  
+- TMM normalization using edgeR  
+- Log2(CPM + 1) transformation  
+- Z-score normalization  
+- Min-Max scaling  
+
+These normalized matrices will be used in PCA, correlation analysis with methylation data, and visualization tasks.
+
+# Load All Required Libraries for Multi-Omics Analysis
+```{r, include=FALSE, message=FALSE, warning=FALSE}
+library(DESeq2)
+library(edgeR)
+library(vsn)
+library(tidyverse)
+library(genefilter)
+library(multtest)
+library(dplyr)
+library(clusterProfiler)
+library(org.Hs.eg.db)
+library(AnnotationDbi)
+library(GeneNet)
+library(ggfortify)
+library(factoextra)
+library(minfi)
+library(DescTools)
+library(IlluminaHumanMethylation450kanno.ilmn12.hg19)
+
+```
+
+# RNA-seq Processing
+Step 2.1: Load Counts + Metadata
+```{r}
+# Load raw RNA-seq count matrix (genes × samples)
+# Rows = genes, Columns = sample IDs (accessions)
+rna_counts <- read.delim("GSE224377_raw_counts_GRCh38.p13_NCBI (1).tsv", row.names = 1)
+
+# Load sample metadata (contains Accession IDs, Titles, Age, Gender, etc.)
+rna_meta <- read.csv("metadata-new.csv")
+
+# Match sample IDs between counts and metadata
+# This step ensures that the sample columns in rna_counts match the metadata rows
+# We replace column names of the count matrix using matched sample names from metadata
+colnames(rna_counts) <- rna_meta$X[match(colnames(rna_counts), rna_meta$Accession)]
+
+# Optional (more explicit Dr. Noha style):
+# ord <- match(colnames(rna_counts), rna_meta$Accession)
+# rna_meta <- rna_meta[ord[which(!is.na(ord))], ]
+# rna_counts <- rna_counts[, which(!is.na(ord))]
+
+# Extract patient ID and sample type from the 'Title' column
+# Example Title: "Patient1, Lesion" → patient = Patient1, sample.type = Lesion
+rna_meta <- rna_meta %>%
+  separate(Title, into = c("patient", "sample.type"), sep = ",", fill = "right") %>%
+  mutate(sample.type = trimws(sample.type))  # Remove any extra spaces around the sample type
+
+
+```
+Step 2.2: Histogram of Raw Counts
+```{r}
+#Histogram of Raw Counts
+pdf("Histogram_0_Raw_Counts.pdf")
+apply(rna_counts, 2, function(x) hist(x, breaks=60))
+dev.off()
+```
+Step 2.3: Filter Genes with >90% Zeros
+
+```{r}
+# Calculate the proportion of zero counts for each gene
+# For each row (gene), count how many samples have a count of 0, then divide by total number of samples
+zero_prop <- rowSums(rna_counts == 0) / ncol(rna_counts)
+
+# Filter out genes where more than 90% of samples have zero counts
+# Retain genes expressed in at least 10% of samples
+rna_counts_filtered <- rna_counts[zero_prop < 0.9, ]
+
+# Save the filtered count matrix to a CSV file for reference
+write.csv(rna_counts_filtered, "Filtered_counts_less90perc_zeros.csv")
+
+# Plot histograms of the filtered counts for each sample to visualize count distributions
+pdf("Histogram_Filtered_counts_less90perc_zeros.pdf")
+apply(rna_counts_filtered, 2, function(x) hist(x, breaks = 60))
+dev.off()
+```
+
+Step 2.4: TMM Normalization
+```{r}
+# Create a DGEList object (Digital Gene Expression list) from the filtered count matrix
+# This is required for edgeR normalization and downstream differential expression analysis
+dge <- DGEList(counts = rna_counts_filtered)
+
+# Apply TMM (Trimmed Mean of M-values) normalization to account for library size and composition bias
+# This step calculates scaling factors to make samples more comparable
+dge <- calcNormFactors(dge, method = "TMM")
+
+```
+Step 2.5: log2(CPM + 1)
+```{r}
+# Convert raw counts to log2 Counts Per Million (CPM) using edgeR's `cpm()` function
+# log = TRUE applies log2 transformation; prior.count = 1 avoids taking log(0)
+rna_log_cpm <- cpm(dge, log = TRUE, prior.count = 1)
+
+# Save the normalized log2 CPM matrix to a CSV file
+write.csv(rna_log_cpm, "RNA_log2_CPM_TMM_filtered.csv")
+
+# Generate histograms for each sample's log2 CPM distribution (QC visualization)
+pdf("Histogram_RNA_log2_CPM_TMM_filtered.pdf")
+apply(rna_log_cpm, 2, function(x) hist(x, breaks = 60))
+dev.off()
+```
+Step 2.6: Z-score Normalization
+
+```{r}
+# Perform z-score normalization (standardization) across genes (rows)
+# Each value is transformed to (x - mean) / sd per gene
+GE_z <- scale(rna_log_cpm)
+
+# Save the z-score normalized expression matrix to a CSV file
+write.csv(GE_z, "RNA_TMM_log2_zscore.csv")
+
+# Generate histograms to visualize the distribution of z-scores for each sample
+pdf("Histogram_RNA_TMM_log2_zscore.pdf")
+apply(GE_z, 2, function(x) hist(x, breaks = 60))
+dev.off()
+```
+Step 2.7: Min-Max Normalization
+
+```{r}
+# Define a function to perform min-max normalization for each vector (gene across samples)
+# The values are scaled to the range [-1, 1]
+minmax_norm <- function(x) {
+  # If all values are identical (to avoid division by zero), return a vector of zeros
+  if (max(x) == min(x)) return(rep(0, length(x)))
+  # Apply min-max scaling formula: scaled_x = 2 * (x - min) / (max - min) - 1
+  2 * (x - min(x)) / (max(x) - min(x)) - 1
+}
+
+# Apply min-max normalization across columns (i.e., for each sample)
+GE_minmax <- apply(rna_log_cpm, 2, minmax_norm)
+
+# Save the min-max normalized matrix to CSV
+write.csv(GE_minmax, "RNA_TMM_log2_minmax_scaled.csv")
+```
+

@@ -1,0 +1,93 @@
+---
+title: "Multi-Omics Analysis of Multiple Sclerosis"
+author: 
+  - "Rofida Gamal (Original Instructor)"
+  - "Mohamed Hussein (Code Structuring,Analysis Execution,GitHub Publication)"
+date: "`r Sys.Date()`"
+output: html_document
+---
+#Task 3: PCA Analysis of RNA-seq Data
+
+This task performs *Principal Component Analysis (PCA)* on the RNA-seq gene expression matrix to explore sample clustering patterns and identify variance structure in the data.
+
+We conduct PCA on both:
+- The *z-score normalized expression matrix* by samples (to identify clustering of samples).
+- The *transposed matrix* by genes (to examine gene-level variation across samples).
+
+Each PCA analysis generates PDF plots for the top principal components (PC1, PC2, and PC3), which can be used for QC or further interpretation.
+
+
+## Load All Required Libraries for Multi-Omics Analysis
+```{r, include=FALSE, message=FALSE, warning=FALSE}
+library(DESeq2)
+library(edgeR)
+library(vsn)
+library(tidyverse)
+library(genefilter)
+library(multtest)
+library(dplyr)
+library(clusterProfiler)
+library(org.Hs.eg.db)
+library(AnnotationDbi)
+library(GeneNet)
+library(ggfortify)
+library(factoextra)
+library(minfi)
+library(DescTools)
+library(IlluminaHumanMethylation450kanno.ilmn12.hg19)
+```
+
+# PCA Analysis
+```{r}
+# Load z-score normalized expression matrix if not in environment
+GE_z <- read.csv("RNA_TMM_log2_zscore.csv", row.names = 1)
+# -------------------------
+# PCA by samples (columns of GE_z)
+# -------------------------
+
+# Perform PCA on z-score normalized gene expression matrix (genes × samples)
+# Each column is a sample → this PCA reflects sample clustering
+pc <- prcomp(GE_z, scale. = TRUE)
+
+# Save PCA plots of samples to a PDF file
+pdf("PCA_plots_samples.pdf")
+
+# Plot PC1 vs PC2
+plot(pc$x[,1], pc$x[,2], col="blue", pch=16, main="PC1 vs PC2")
+
+# Plot PC2 vs PC3
+plot(pc$x[,2], pc$x[,3], col="green", pch=16, main="PC2 vs PC3")
+
+# Plot PC1 vs PC3
+plot(pc$x[,1], pc$x[,3], col="red", pch=16, main="PC1 vs PC3")
+
+# Close PDF device
+dev.off()
+
+# -------------------------
+# PCA by genes (transpose of GE_z)
+# -------------------------
+
+# Transpose expression matrix → rows now represent samples, columns represent genes
+GE_t <- t(GE_z)
+
+# Remove genes with more than 20% missing values
+GE_t <- GE_t[, colMeans(is.na(GE_t)) <= 0.2]
+
+# Remove genes with zero standard deviation (constant values across samples)
+GE_t <- GE_t[, apply(GE_t, 2, function(x) sd(x, na.rm = TRUE)) > 0]
+
+# Replace remaining NAs (if any) with the column-wise mean
+GE_t[is.na(GE_t)] <- apply(GE_t, 2, function(x) mean(x, na.rm = TRUE))
+
+# Perform PCA on this filtered and imputed gene matrix
+pc <- prcomp(GE_t, scale. = TRUE)
+
+# Save PCA plot of genes to a PDF
+pdf("PCA_plots_genes.pdf")
+plot(pc$x[,1], pc$x[,2], col="blue", pch=16, main="PC1 vs PC2 (Genes)")
+dev.off()
+
+
+```
+

@@ -1,0 +1,149 @@
+---
+title: "Multi-Omics Analysis of Multiple Sclerosis"
+author: 
+  - "Rofida Gamal (Original Instructor)"
+  - "Mohamed Hussein (Code Structuring,Analysis Execution,GitHub Publication)"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    self_contained: true
+---
+## Task 7: Functional Enrichment Analysis of DEGs and DMR-Associated Genes
+
+This task performs Gene Ontology (GO) enrichment analysis to explore the biological significance of differentially expressed genes (DEGs) and genes associated with differentially methylated regions (DMRs). The workflow includes:
+
+- Loading filtered DEG and DMR datasets
+- Annotating CpG sites and mapping to gene symbols
+- Converting gene symbols to Entrez IDs
+- Running GO enrichment analysis (Biological Process category)
+- Visualizing enriched terms using dot plots
+
+The analysis highlights key biological processes potentially regulated by transcriptional and epigenetic alterations in the studied condition.
+
+---
+
+### Load All Required Libraries for Multi-Omics Analysis 
+
+
+```{r, include=FALSE, message=FALSE, warning=FALSE}
+library(DESeq2)
+library(edgeR)
+library(vsn)
+library(tidyverse)
+library(genefilter)
+library(multtest)
+library(dplyr)
+library(clusterProfiler)
+library(org.Hs.eg.db)
+library(AnnotationDbi)
+library(GeneNet)
+library(ggfortify)
+library(factoextra)
+library(minfi)
+library(DescTools)
+library(IlluminaHumanMethylation450kanno.ilmn12.hg19)
+
+```
+##  Load DEG and DMR Data + Extract Gene Symbols
+```{r}
+# Load DEG table (make sure rownames are ENTREZID if used directly)
+deg_filtered <- read.csv("DEG_significant_filtered.csv", row.names = 1)
+
+# Load DMR data
+dmrs_lm <- read.csv("dmrs_methylation_lm_based.csv", row.names = 1)
+
+# Get CpG annotation from 450k array
+ann450k <- getAnnotation(IlluminaHumanMethylation450kanno.ilmn12.hg19)
+
+# Map CpG IDs to gene symbols
+mapped_anns <- ann450k[rownames(ann450k) %in% rownames(dmrs_lm), ]
+dmr_genes <- unique(na.omit(mapped_anns$UCSC_RefGene_Name))
+dmr_genes <- unique(unlist(strsplit(dmr_genes, ";")))  # handle multiple gene symbols
+
+```
+##  Convert Gene Symbols to Entrez IDs
+```{r}
+# Convert gene symbols to Entrez IDs
+entrez_ids_dmr <- bitr(
+  dmr_genes,
+  fromType = "SYMBOL",
+  toType = "ENTREZID",
+  OrgDb = org.Hs.eg.db
+)
+```
+
+
+
+## Start of Enrichment Analysis
+
+```{r}
+#Enrichment Analysis
+ego <- enrichGO(gene          = rownames(deg_filtered),
+                OrgDb         = org.Hs.eg.db,
+                keyType       = "ENTREZID",  # Important
+                ont           = "BP",
+                pAdjustMethod = "BH",
+                pvalueCutoff  = 0.05,
+                readable      = TRUE)
+
+# View results
+dotplot(ego)
+
+
+```
+
+
+
+```{r}
+# Install annotation package if not already
+# BiocManager::install("IlluminaHumanMethylation450kanno.ilmn12.hg19")
+library(IlluminaHumanMethylation450kanno.ilmn12.hg19)
+library(minfi)  # needed for getAnnotation
+
+# Get the CpG annotation
+ann450k <- getAnnotation(IlluminaHumanMethylation450kanno.ilmn12.hg19)
+
+dmrs <- dmrs_lm
+
+# Match CpG IDs in annotation
+mapped_anns <- ann450k[rownames(ann450k) %in% rownames(dmrs), ]
+
+# Extract gene symbols associated with DMRs
+dmr_genes <- unique(na.omit(mapped_anns$UCSC_RefGene_Name))
+dmr_genes <- unique(unlist(strsplit(dmr_genes, ";")))  # handle multiple genes per CpG
+
+```
+
+
+```{r}
+library(clusterProfiler)
+library(org.Hs.eg.db)
+
+# Convert gene symbols to Entrez IDs
+entrez_ids_dmr <- bitr(
+  dmr_genes,
+  fromType = "SYMBOL",
+  toType = "ENTREZID",
+  OrgDb = org.Hs.eg.db
+)
+
+# Run enrichment analysis (Gene Ontology - Biological Process)
+ego <- enrichGO(
+  gene = entrez_ids_dmr$ENTREZID,
+  OrgDb = org.Hs.eg.db,
+  ont = "BP",             # BP = Biological Process
+  pAdjustMethod = "BH",
+  pvalueCutoff = 0.05,
+  readable = TRUE
+)
+
+# Plot the enrichment result
+dotplot(ego, showCategory = 20, title = "GO Biological Process Enrichment")
+
+
+```
+
+
+
+
+
