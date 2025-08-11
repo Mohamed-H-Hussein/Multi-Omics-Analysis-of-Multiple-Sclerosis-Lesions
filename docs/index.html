@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>HTML Reports - Multi-Omics Analysis</title>
+  <style>
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      max-width: 800px;
+      margin: 40px auto;
+      padding: 0 20px;
+      background-color: #f7f9fc;
+      color: #2c3e50;
+    }
+    h1 {
+      text-align: center;
+      margin-bottom: 5px;
+      font-weight: 700;
+      font-size: 2.2em;
+      color: #34495e;
+    }
+    p.description {
+      text-align: center;
+      margin-top: 0;
+      margin-bottom: 30px;
+      font-size: 1.1em;
+      color: #555;
+    }
+    ul {
+      list-style-type: none;
+      padding: 0;
+      border-top: 1px solid #d1d5db;
+      border-bottom: 1px solid #d1d5db;
+      background: #fff;
+      box-shadow: 0 0 8px rgb(0 0 0 / 0.05);
+      border-radius: 8px;
+    }
+    li {
+      margin: 0;
+      border-bottom: 1px solid #eee;
+      transition: background-color 0.2s ease;
+    }
+    li:last-child {
+      border-bottom: none;
+    }
+    a {
+      display: block;
+      padding: 15px 20px;
+      text-decoration: none;
+      color: #1e88e5;
+      font-weight: 600;
+      font-size: 1.1em;
+    }
+    a:hover {
+      background-color: #e3f2fd;
+      color: #0d47a1;
+      border-left: 4px solid #0d47a1;
+    }
+    @media (max-width: 600px) {
+      body {
+        margin: 20px;
+        padding: 0 10px;
+      }
+      a {
+        font-size: 1em;
+        padding: 12px 15px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <h1>HTML Reports</h1>
+  <p class="description">
+    These reports are the output generated from the R Markdown (.Rmd) analysis scripts.<br />
+    They contain detailed results, figures, and summaries of the Multi-Omics analysis of Multiple Sclerosis lesions.
+  </p>
+  <ul>
+    <li><a href="00_setup_instruction.html">Setup Instructions</a></li>
+    <li><a href="01_libraries_setup.html">Libraries Setup</a></li>
+    <li><a href="02_RNAseq_Preprocessing.html">RNAseq Preprocessing</a></li>
+    <li><a href="03_PCA_Analysis.html">PCA Analysis</a></li>
+    <li><a href="04_DEG_DMR_Analysis.html">DEG & DMR Analysis</a></li>
+    <li><a href="05_Integration_Regression.html">Integration & Regression</a></li>
+    <li><a href="06_Network_Construction.html">Network Construction</a></li>
+    <li><a href="07_Enrichment_In-terpretation.html">GO Enrichment Analysis</a></li>
+    <li><a href="08_DIABLO-Model.html">DIABLO Model</a></li>
+  </ul>
+</body>
+</html>
