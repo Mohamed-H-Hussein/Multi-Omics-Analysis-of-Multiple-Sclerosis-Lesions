@@ -317,7 +317,20 @@ All outputs were generated, interpreted, and organized by the author in a fully 
 ## 📝Citation & Usage
 
 This project is open-source and provided for educational and academic purposes.
-If reused or adapted, please cite the original GEO dataset and workshop name.
+
+If you reuse, adapt, or build upon this work, please cite:
+
+- The original GEO dataset: **GSE224377**  
+- The ABCON 2025  Workshop titled "**🔬 Discovering Disease Pathways from Multi-Omics Data**"   
+- The author and repository to acknowledge the analysis contributions:
+
+
+
+Hussein, Mohamed H. (2025). Multi-Omics Analysis of Multiple Sclerosis Lesions \[Data analysis workflow]. GitHub repository. [https://github.com/Mohamed-H-Hussein/Multi-Omics-Analysis-of-Multiple-Sclerosis-Lesions](https://github.com/Mohamed-H-Hussein/Multi-Omics-Analysis-of-Multiple-Sclerosis-Lesions)
+
+
+
+Proper citation supports transparency, credit to contributors and reproducible science.
 
 ---
 ## 📜 License
