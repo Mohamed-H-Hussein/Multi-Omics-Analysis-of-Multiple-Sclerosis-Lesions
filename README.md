@@ -256,7 +256,7 @@ You can run them **individually** from RStudio, or compile them into `.html` rep
 | 04   | [04_DEG_DMR_Analysis.Rmd](scripts/04_DEG_DMR_Analysis.Rmd)       | Identify DEGs (edgeR) & DMRs (lm, glm, t-test)    |
 | 05   | [05_Integration_Regression.Rmd](scripts/05_Integration_Regression.Rmd) | DEG–DMR regression (adjusted for age & gender)    |
 | 06   | [06_Network_Construction.Rmd](scripts/06_Network_Construction.Rmd)   | Build multi-layered omics networks (CpG–Gene)     |
-| 07   | [07_GO_Enrichment_Analysis.Rmd](scripts/07_Enrichment%20In-terpretation.Rmd) | GO enrichment for DEGs and DMR-associated genes   |
+| 07   | [07_GO_Enrichment_Analysis.Rmd](scripts/07_Enrichment_In%20terpretation.Rmd) | GO enrichment for DEGs and DMR-associated genes   |
 | 08   | [08_DIABLO-Model.Rmd](scripts/08_DIABLO%20Model.Rmd)           | DIABLO integration for multi-omics classification |
 
 To render any report and inspect figures and outputs:
