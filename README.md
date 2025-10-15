@@ -2,7 +2,7 @@
 # 🧬 Multi-Omics Analysis of Multiple Sclerosis Lesions
 
 🔍 **GEO Dataset: [GSE224377](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE224377)**  
-👨‍🔬 **Conducted during and after the ABCON 2025 Multi-Omics Workshop**  
+👨‍🔬 **Conducted during and after the ABCON 2025 Workshop**  
 📅 **Analysis completed on: August 10, 2025**  
 📁 **Full details in [`analysis_report.md`](analysis_report.md)**
 
@@ -273,7 +273,7 @@ rmarkdown::render("scripts/04_DEG_DMR_Analysis.Rmd")
 
 ##  🌟 Acknowledgment
 
-This project was developed as part of the **ABCON 2025 Multi-Omics Workshop**, during the session:  
+This project was developed as part of the **ABCON 2025 Workshop**, during the session:  
 **"🔬 Discovering Disease Pathways from Multi-Omics Data"**
 
 We gratefully acknowledge the valuable guidance and instruction provided by:
